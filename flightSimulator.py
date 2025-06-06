@@ -290,7 +290,6 @@ def renderPoints(position,trans,ax):
                 #image point onto viewplane
                 focusScale = f/rotatedPoint[2]
                 imagedPoint = [focusScale*rotatedPoint[0],focusScale*rotatedPoint[1]]
-                #normalize imaged point to test against the boundaries. Note, this may not be correct.
                 if np.dot(rotatedPoint,zAxis) >= 0 and imagedPoint[0] <= topRight[0]*rotatedPoint[2]/topRight[2] and imagedPoint[0] >= bottomLeft[0]*rotatedPoint[2]/bottomLeft[2] and imagedPoint[1] <= topRight[1]*rotatedPoint[2]/topRight[2] and imagedPoint[1] >= bottomLeft[1]*rotatedPoint[2]/bottomLeft[2]: #Check if point is in front of the viewplane and then if it's within the bounds of the window
                     points.append([imagedPoint[0]+1024/2,imagedPoint[1]+768/2])
                     dists.append(f/distance * 5)
@@ -308,10 +307,10 @@ def main():
 
     if os.path.exists('Data/tables.db') and os.path.exists('Data/savedata.db'):
 
-        data = sqlite3.connect("file:tables.db?mode=rw", uri=True)
+        data = sqlite3.connect("file:Data/tables.db?mode=rw", uri=True)
         cur = data.cursor()
 
-        data2 = sqlite3.connect("file:savedata.db?mode=rw", uri=True)
+        data2 = sqlite3.connect("file:Data/savedata.db?mode=rw", uri=True)
         cur2 = data2.cursor()
 
         chassisData = cur.execute("SELECT name, accel, decel, pitchaccel, yawaccel, rollaccel, speedmod, speedfoils, minthrottle, optthrottle, maxthrottle, slide FROM chassis").fetchall()
@@ -416,7 +415,7 @@ def main():
         [sg.Push(),sg.Button('Pause',font=baseFont),sg.Button('Reset',font=baseFont),sg.Push()]
     ]
 
-    infoWindow = sg.Window('Flight Info',dataLayout,finalize=True,size=(400,250),relative_location=(-712,0))
+    infoWindow = sg.Window('Flight Info',dataLayout,finalize=True,size=(400,300),relative_location=(-712,0))
 
     pygame.init()
     screen = pygame.display.set_mode((1024,768))
@@ -634,12 +633,12 @@ def main():
 
         ax.cla()
         ax.set_aspect('equal')
+        maxDim = max(100,max([max(x) for x in positionTrack] + [-min(x) for x in positionTrack]))
         if plotToggle == 'self':
             ax.set_xlim(position[0]-250,position[0]+250)
             ax.set_ylim(position[1]-250,position[1]+250)
             ax.set_zlim(position[2]-250,position[2]+250)
         else:
-            maxDim = max(100,max([max(x) for x in positionTrack] + [-min(x) for x in positionTrack]))
             ax.set_xlim(-maxDim,maxDim)
             ax.set_ylim(-maxDim,maxDim)
             ax.set_zlim(-maxDim,maxDim)
@@ -647,8 +646,12 @@ def main():
         if positionTrack != []:
             ax.plot([pos[0] for pos in positionTrack],[pos[1] for pos in positionTrack],[pos[2] for pos in positionTrack])
             if infoValues['quivertoggle']:
-                ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[fac[0] for fac in facingTrack],[fac[1] for fac in facingTrack],[fac[2] for fac in facingTrack],length=50,color='red')
-                ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[vel[0] for vel in velocityTrack],[vel[1] for vel in velocityTrack],[vel[2] for vel in velocityTrack],length=50,color='green')
+                if maxDim < 250:
+                    aLength = maxDim/5
+                else:
+                    aLength = 50
+                ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[fac[0] for fac in facingTrack],[fac[1] for fac in facingTrack],[fac[2] for fac in facingTrack],length=aLength,color='red')
+                ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[vel[0] for vel in velocityTrack],[vel[1] for vel in velocityTrack],[vel[2] for vel in velocityTrack],length=aLength,color='green')
 
         if infoEvents == 'Reset':
             speed = 0
@@ -661,6 +664,9 @@ def main():
             lastTick = 0
             position = [0, 0, 0]
             positionTrack = []
+            positionTrackQuiver = []
+            velocityTrack = []
+            facingTrack = []
 
             throttle = 0
             pitchThrottle = 0
