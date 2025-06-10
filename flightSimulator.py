@@ -10,6 +10,8 @@ import win32gui
 
 from pygame.locals import *
 
+np.seterr(invalid='raise')
+
 fontList = sg.Text.fonts_installed_list()
 
 if "Roboto" not in fontList:
@@ -70,7 +72,10 @@ def sign(x):
 def rotateIntoVector(vec1,vec2,*rotAxis):
     if rotAxis == tuple([]):
         rotAxis = np.cross(vec1,vec2)
-        rotAxis = rotAxis/np.linalg.norm(rotAxis)
+        if np.linalg.norm(rotAxis) == 0:
+            rotAxis = [0,0,1]
+        else:
+            rotAxis = rotAxis/np.linalg.norm(rotAxis)
     else:
         rotAxis = rotAxis[0]
     theta = np.arccos(np.dot(vec1,vec2))
@@ -95,7 +100,10 @@ def isOrthogonal(vec1,vec2):
 
 def normalize(vec):
     mag = np.linalg.norm(vec)
-    return [vec[0]/mag, vec[1]/mag, vec[2]/mag]
+    if mag == 0:
+        return np.array(vec)
+    else:
+        return np.array(vec)/mag
 
 def reorthonormalize(matrix):
     xVector = [matrix[0][0],matrix[1][0],matrix[2][0]]
@@ -246,7 +254,11 @@ def renderPoints(position,trans,ax):
 
     #So to do this we just need to rotate the coordinate system into our facing direction (Z) and then rotate about Z by some angle to align the X and Y axes.
     zRot = rotateIntoVector(zTrans,zAxis)
-    yAngle = np.arccos(np.dot(np.matmul(zRot,yTrans),yAxis))
+    yAnglePreCheck = np.dot(np.matmul(zRot,yTrans),yAxis)
+    if abs(yAnglePreCheck) > 1:
+        yAngle = np.arccos(sign(yAnglePreCheck))
+    else:
+        yAngle = np.arccos(yAnglePreCheck)
 
     kMatrix = np.array([[0,-1,0],[1,0,0],[0,0,0]])
     identity = np.array([[1,0,0],[0,1,0],[0,0,1]])
@@ -319,14 +331,19 @@ def main():
         engineData = cur2.execute("SELECT * FROM engine").fetchall()
         engineNames = [engine[0] for engine in engineData]
 
+        boosterData = cur2.execute("SELECT * FROM booster").fetchall()
+        boosterNames = [booster[0] for booster in boosterData]
+
         selectionLeftCol = [
             [sg.Push(),sg.Text('Select Chassis:',font=baseFont)],
-            [sg.Push(),sg.Text('Select Engine:',font=baseFont)]
+            [sg.Push(),sg.Text('Select Engine:',font=baseFont)],
+            [sg.Push(),sg.Text('Select Booster:',font=baseFont)],
         ]
 
         selectionRightCol = [
-            [sg.Combo(chassisNames,'',s=(25,20),font=baseFont,key='chassis'),sg.Push()],
-            [sg.Combo(engineNames,'',s=(25,10),font=baseFont,key='engine'),sg.Push()]
+            [sg.Combo(chassisNames,'Havoc Starfighter',s=(25,20),font=baseFont,key='chassis'),sg.Push()],
+            [sg.Combo(engineNames,'[BHI] RE10 Engine // Icarus',s=(25,10),font=baseFont,key='engine'),sg.Push()],
+            [sg.Combo(boosterNames,'[BHI] BR-5x // Overdriven 3',s=(25,10),font=baseFont,key='booster'),sg.Push()]
         ]
 
         selectionLayout = [
@@ -335,7 +352,7 @@ def main():
             [sg.Push(),sg.Button('Continue',font=('Roboto',14,'bold')),sg.Push()]
         ]
 
-        window = sg.Window('Select Chassis and Engine',selectionLayout,finalize=True,size=(400,150))
+        window = sg.Window('Select Chassis, Engine, and Booster',selectionLayout,finalize=True,size=(400,150))
 
         while True:
             event, values = window.read()
@@ -343,10 +360,12 @@ def main():
             if event == 'Continue':
                 chassis = values['chassis']
                 engine = values['engine']
+                booster = values['booster']
                 
-                if chassis != '' and engine != '':
+                if chassis != '' and engine != '' and booster != '':
                     chassisStats = list([data for data in chassisData if data[0] == chassis][0])
                     engineStats = list([data for data in engineData if data[0] == engine][0])
+                    boosterStats = list([data for data in boosterData if data[0] == booster][0])
                     overloadMod = 1.4
                     accel = tryFloat(chassisStats[1]) * overloadMod
                     decel = tryFloat(chassisStats[2]) * overloadMod
@@ -365,6 +384,11 @@ def main():
                     maxYaw = engineStats[4] * overloadMod
                     maxRoll = engineStats[5] * overloadMod
                     topSpeed = engineStats[6] * overloadMod * speedMod
+                    boosterEnergy = boosterStats[3]
+                    boosterRR = boosterStats[4]
+                    boosterCons = boosterStats[5]
+                    boosterAccel = boosterStats[6]
+                    boosterTS = boosterStats[7] * speedMod
                     break
 
             if event == sg.WIN_CLOSED:
@@ -388,15 +412,22 @@ def main():
         maxYaw = 90 * overloadMod
         maxRoll = 90 * overloadMod
         topSpeed = 125 * overloadMod * speedMod
+        boosterEnergy = boosterStats[3]
+        boosterRR = boosterStats[4]
+        boosterCons = boosterStats[5]
+        boosterAccel = boosterStats[6]
+        boosterTS = boosterStats[7] * speedMod
 
     dataLayoutLeft = [
         [sg.Push(),sg.Text('Speed: ',font=baseFont)],
         [sg.Push(),sg.Text('Pitch: ',font=baseFont)],
         [sg.Push(),sg.Text('Yaw: ',font=baseFont)],
         [sg.Push(),sg.Text('Roll: ',font=baseFont)],
+        [sg.Push(),sg.Text('Booster Energy: ',font=baseFont)],
         [sg.Push(),sg.Text('Coordinates: ',font=baseFont)],
         [sg.Push(),sg.Text('Facing: ',font=baseFont)],
-        [sg.Push(),sg.Text('Show K/V Arrows: ',font=baseFont)]
+        [sg.Push(),sg.Text('Show K/V Arrows: ',font=baseFont)],
+        [sg.Push(),sg.Text('Show UI: ',font=baseFont)]
     ]
 
     dataLayoutRight = [
@@ -404,9 +435,11 @@ def main():
         [sg.Text('',key='pitchoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='yawoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='rolloutput',font=baseFont),sg.Push()],
+        [sg.Text('',key='boosterenergyoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='coordoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='facingoutput',font=baseFont),sg.Push()],
-        [sg.Checkbox('',False,key='quivertoggle'),sg.Push()]
+        [sg.Checkbox('',False,key='quivertoggle'),sg.Push()],
+        [sg.Checkbox('',True,key='uitoggle'),sg.Push()]
     ]
 
     dataLayout = [
@@ -415,19 +448,22 @@ def main():
         [sg.Push(),sg.Button('Pause',font=baseFont),sg.Button('Reset',font=baseFont),sg.Push()]
     ]
 
-    infoWindow = sg.Window('Flight Info',dataLayout,finalize=True,size=(400,300),relative_location=(-712,0))
+    infoWindow = sg.Window('Flight Info',dataLayout,finalize=True,size=(400,325),relative_location=(-712,0))
 
     pygame.init()
     screen = pygame.display.set_mode((1024,768))
     pygame.display.set_caption('Explore!!')
     pygame.mouse.set_visible(1)
+    pygame.font.init()
+    
+    fontFace = pygame.font.SysFont('VerdanaBold',21)
 
     mousePos = [0,0]
 
     screenRes = [1024, 768]
 
-    deadZoneOuter = 1/3
-    deadZoneInner = 1/12
+    deadZoneOuter = 1/4
+    deadZoneInner = 1/16
 
     deadZoneInnerEnd = [screenRes[0]/2 * deadZoneInner,screenRes[1]/2 * deadZoneInner]
     deadZoneOuterStart = [screenRes[0]/2 * deadZoneOuter,screenRes[1]/2 * deadZoneOuter] #since we're splitting the screen into +- half the dimensions already, and we're making the deadzone half of that
@@ -446,8 +482,13 @@ def main():
     throttleRollRight = False
     throttleRollLeft = False
 
+    boosterActive = False
+    boosterOffStart = 0
+    boosterCurEnergy = boosterEnergy
+    boosterTickRider = time.time() -1.5
+
     speed = 0
-    velocity = [0,0,0]
+    velocity = np.array([0,0,0])
     pitch = 0
     yaw = 0
     roll = 0
@@ -460,6 +501,10 @@ def main():
     trackCounter = 10
     transform = np.identity(3)
     facing = [transform[0][2],transform[1][2],transform[2][2]]
+
+    viewVector = [1,0,0]
+    azimuthAngle = 0
+    elevationAngle = 0
 
     timeStep = 1/30
 
@@ -532,14 +577,14 @@ def main():
                     keyPress = event.text
                 if keyPress == 'w':
                     throttleUp = True
-                    if time.time() - lastThrottle > 0.1:
-                        throttle += 0.05
+                    if time.time() - lastThrottle > 0.025:
+                        throttle += 0.025
                         throttle = min(throttle,1)
                         lastThrottle = time.time()
                 elif keyPress == 's':
                     throttleDown = True
-                    if time.time() - lastThrottle > 0.1:
-                        throttle -= 0.05
+                    if time.time() - lastThrottle > 0.025:
+                        throttle -= 0.025
                         throttle = max(throttle,0)
                         lastThrottle = time.time()
                 elif keyPress == 'q':
@@ -554,6 +599,13 @@ def main():
                 elif keyPress == 'd':
                     throttleYawRight = True
                     yawThrottleKey = 1
+                elif event.type == KEYDOWN and keyPress == 'b':
+                    if boosterActive:
+                        boosterActive = False
+                        boosterOffStart = time.time()
+                    else:
+                        if time.time() - boosterOffStart > min(max(boosterTS/decel,2),10):
+                            boosterActive = True
             else:
                 pass
             yawThrottle = yawThrottleKey + yawThrottleRetained
@@ -562,13 +614,38 @@ def main():
             elif yawThrottle < -1:
                 yawThrottle = -1
 
+        #Booster energy management - This being here basically assumes the model ticks are gonna be real-time and not laggy. If that's not the case, then recharge/cons rates will be off a bit
+        if boosterActive:
+            if boosterCurEnergy > 0 and time.time() - boosterTickRider >= 1.5:
+                boosterCurEnergy -= boosterCons*1.5
+            if boosterCurEnergy < 0:
+                boosterCurEnergy = 0
+                boosterActive = False
+                boosterOffStart = time.time()
+        else:
+            if time.time() - boosterTickRider >= 1.5:
+                boosterCurEnergy += boosterRR*1.5
+                if boosterCurEnergy > boosterEnergy:
+                    boosterCurEnergy = boosterEnergy
+        if time.time() - boosterTickRider >= 1.5:
+            boosterTickRider = time.time() #update booster tick if it's past the threshold
+
         if time.time() - lastTick > timeStep and togglePause == False:
             if lastTick != 0:
                 dt = timeStep
             else:
                 dt = timeStep
-            speed = updateAxis(speed,throttle,topSpeed,accel,decel,dt)
-            throttleMod = getThrottleMod(speed,topSpeed,chassisMinThrottleMod,chassisOptThrottleMod,chassisMaxThrottleMod)
+
+            if boosterActive:
+                boosterSpeedMod = boosterTS
+                boosterAccelMod = boosterAccel
+                boosterThrottleMod = 0
+            else:
+                boosterSpeedMod = 0
+                boosterAccelMod = 0
+                boosterThrottleMod = 1
+            speed = updateAxis(speed,throttle**boosterThrottleMod,topSpeed+boosterSpeedMod,accel+boosterAccelMod,decel,dt)
+            throttleMod = getThrottleMod(speed,topSpeed+boosterSpeedMod,chassisMinThrottleMod,chassisOptThrottleMod,chassisMaxThrottleMod)
             pitch = updateAxis(pitch,pitchThrottle,maxPitch*throttleMod,pAccel,pAccel,dt)
             yaw = updateAxis(yaw,yawThrottle,maxYaw*throttleMod,yAccel,yAccel,dt)
             roll = updateAxis(roll,rollThrottle,maxRoll,rAccel,rAccel,dt)
@@ -582,8 +659,7 @@ def main():
             facing = [transform[0][2],transform[1][2],transform[2][2]]
 
             if slideMod == 0:
-                for i in range(0,3):
-                    velocity[i] = facing[i] * speed
+                velocity = facing * speed
             else:
                 for i in range(0,3):
                     velocity[i] += facing[i] * speed * slideMod * dt
@@ -591,9 +667,7 @@ def main():
                 velocityMag = np.linalg.norm(velocity)
                 if velocityMag > speed:
                     velocityMag = speed
-                    for i in range(0,3):
-                        velocity[i] = normalize(velocity)[i] * speed
-
+                    velocity = normalize(velocity) * speed
             position = [position[0]+velocity[0]*dt, position[1]+velocity[1]*dt, position[2]+velocity[2]*dt]
 
             positionTrack.append(position)
@@ -601,7 +675,10 @@ def main():
             if trackCounter == 10:
                 trackCounter = 0
                 positionTrackQuiver.append(position)
-                velocityTrack.append([velocity[0]/np.linalg.norm(velocity),velocity[1]/np.linalg.norm(velocity),velocity[2]/np.linalg.norm(velocity)])
+                if np.linalg.norm(velocity) == 0:
+                    velocityTrack.append([0,0,0])
+                else:
+                    velocityTrack.append([velocity[0]/np.linalg.norm(velocity),velocity[1]/np.linalg.norm(velocity),velocity[2]/np.linalg.norm(velocity)])
                 facingTrack.append(facing)
             else:
                 trackCounter += 1
@@ -611,9 +688,70 @@ def main():
             screen.fill((0,0,0))
 
             for i in range(len(displayedPoints)):
-                pygame.draw.circle(screen,tuple([0,255,255]),displayedPoints[i],radii[i])
+                pygame.draw.circle(screen,tuple([128,255,255]),displayedPoints[i],radii[i])
+            arcRect = [512-120,384-110,240,220]
+
+            if infoValues['uitoggle']:
+
+                lineColor = tuple([200,200,200])
+                pygame.draw.arc(screen,lineColor,arcRect,2*np.pi/3,4*np.pi/3,width=1)
+
+                if boosterThrottleMod == 0:
+                    boostThrottle = 1
+                else:
+                    boostThrottle = throttle
+
+                if np.linalg.norm(velocity) > topSpeed:
+                    arcStart = 2*np.pi/3 * (2 - topSpeed/np.linalg.norm(velocity))
+                    arcStart2 = arcStart
+                    pygame.draw.arc(screen,tuple([223,39,37]),arcRect,2*np.pi/3,arcStart2,width=7) #Booster speed bar
+                else:
+                    arcStart = 2*np.pi/3 * (2 - min(1,np.linalg.norm(velocity)/(topSpeed)))
+                    arcStart2 = 2*np.pi/3 * (2 - boostThrottle)
+                pygame.draw.arc(screen,tuple([37,174,196]),arcRect,arcStart,4*np.pi/3,width=9) #Speed Bar
+                pygame.draw.arc(screen,tuple([237,183,16]),arcRect,arcStart2,arcStart2+np.pi/48,width=9) #Throttle
+
+                crosshairColor = tuple([80,255,80])
+
+                arcStart3 = 4*np.pi/3 - np.pi/18*(boosterCurEnergy/boosterEnergy)
+                arcRectWider = [512-129,384-119,258,238]
+                pygame.draw.arc(screen,crosshairColor,arcRectWider,arcStart3,4*np.pi/3,width=6) #Booster Energy
+
+                speedText = fontFace.render(str(np.int16(np.linalg.norm(velocity)*10)),True,(100,255,100),(0,0,0))
+                boosterEnergyText = fontFace.render(str(np.int16(boosterCurEnergy)),True,(100,255,100),(0,0,0))
+                screen.blit(speedText,(475,465))
+                screen.blit(boosterEnergyText,(390,465))
                 
+                pygame.draw.rect(screen,crosshairColor,[511,383,4,4],border_radius=1) #Draw Crosshairs
+                pygame.draw.line(screen,crosshairColor,[512+25,384+20],[512+40,384+35],2)
+                pygame.draw.line(screen,crosshairColor,[512+40,384+35],[512+40,384+45],2)
+
+                pygame.draw.line(screen,crosshairColor,[512-25,384+20],[512-40,384+35],2)
+                pygame.draw.line(screen,crosshairColor,[512-40,384+35],[512-40,384+45],2)
+
+                pygame.draw.line(screen,crosshairColor,[512+25,384-20],[512+40,384-35],2)
+                pygame.draw.line(screen,crosshairColor,[512+40,384-35],[512+40,384-45],2)
+
+                pygame.draw.line(screen,crosshairColor,[512-25,384-20],[512-40,384-35],2)
+                pygame.draw.line(screen,crosshairColor,[512-40,384-35],[512-40,384-45],2)
+
             pygame.display.flip()
+
+            newViewVector = np.cross(facing,velocity) #perpendicular to facing and velocity. If these are in the same direction, the cross product will be zero in which case we just default back to the x-axis of the ship.
+            if np.linalg.norm(newViewVector) != 0:
+                viewVector = normalize(newViewVector)
+            if viewVector[0] == 0:
+                if sign(viewVector[1]) == 1:
+                    azimuthAngle = 90
+                else:
+                    azimuthAngle = -90
+            else:
+                azimuthAngle = np.arctan(viewVector[1]/viewVector[0]) * 180/np.pi
+                if sign(viewVector[0]) == -1:
+                    azimuthAngle += 180
+                elevationAngle = np.arctan(viewVector[2]/np.sqrt(viewVector[0]**2+viewVector[1]**2)) * 180/np.pi
+            # print('ele\t' + str(elevationAngle) + '\t' + str(viewVector[2]) + '\t' + str(np.sqrt(viewVector[0]**2+viewVector[1]**2)))
+            # print('azi\t' + str(azimuthAngle) + '\t' + str(viewVector[0]) + '\t' + str(viewVector[1]))
 
             lastTick = time.time()
 
@@ -621,6 +759,7 @@ def main():
         infoWindow['pitchoutput'].update(round(pitch,0))
         infoWindow['yawoutput'].update(round(yaw,0))
         infoWindow['rolloutput'].update(round(roll,0))
+        infoWindow['boosterenergyoutput'].update(str(round(boosterCurEnergy,1))+' / '+str(round(boosterEnergy,1)))
         infoWindow['coordoutput'].update('X ' + str(round(position[0],0)) + ' Y ' + str(round(position[1],0)) + ' Z ' + str(round(position[2],0)))
         infoWindow['facingoutput'].update('X ' + str(round(facing[0],2)) + ' Y ' + str(round(facing[1],2)) + ' Z ' + str(round(facing[2],2)))
 
@@ -638,36 +777,27 @@ def main():
             ax.set_xlim(position[0]-250,position[0]+250)
             ax.set_ylim(position[1]-250,position[1]+250)
             ax.set_zlim(position[2]-250,position[2]+250)
+            ax.view_init(elev=elevationAngle,azim=azimuthAngle,roll=0)
         else:
             ax.set_xlim(-maxDim,maxDim)
             ax.set_ylim(-maxDim,maxDim)
             ax.set_zlim(-maxDim,maxDim)
         ax.scatter([0],[0],[0],c='Red',s=10)
         if positionTrack != []:
-            ax.plot([pos[0] for pos in positionTrack],[pos[1] for pos in positionTrack],[pos[2] for pos in positionTrack])
+            if maxDim < 250:
+                aLength = maxDim/5
+            else:
+                aLength = 50
+
+            velNorm = normalize(velocity)
+            ax.plot([pos[0] for pos in positionTrack],[pos[1] for pos in positionTrack],[pos[2] for pos in positionTrack],color='blue')
+            ax.quiver(positionTrack[-1][0],positionTrack[-1][1],positionTrack[-1][2],facing[0],facing[1],facing[2],length=aLength,color='red')
+            ax.quiver(positionTrack[-1][0],positionTrack[-1][1],positionTrack[-1][2],velNorm[0],velNorm[1],velNorm[2],length=aLength,color='green')
             if infoValues['quivertoggle']:
-                if maxDim < 250:
-                    aLength = maxDim/5
-                else:
-                    aLength = 50
                 ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[fac[0] for fac in facingTrack],[fac[1] for fac in facingTrack],[fac[2] for fac in facingTrack],length=aLength,color='red')
                 ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[vel[0] for vel in velocityTrack],[vel[1] for vel in velocityTrack],[vel[2] for vel in velocityTrack],length=aLength,color='green')
 
         if infoEvents == 'Reset':
-            speed = 0
-            velocity = 0
-            throttleMod = chassisMinThrottleMod
-            pitch = 0
-            yaw = 0
-            roll = 0
-            transform = np.identity(3)
-            lastTick = 0
-            position = [0, 0, 0]
-            positionTrack = []
-            positionTrackQuiver = []
-            velocityTrack = []
-            facingTrack = []
-
             throttle = 0
             pitchThrottle = 0
             yawThrottle = 0
@@ -682,9 +812,44 @@ def main():
             throttleRollRight = False
             throttleRollLeft = False
 
+            boosterActive = False
+            boosterOffStart = 0
+            boosterCurEnergy = boosterEnergy
+            boosterTickRider = time.time() -1.5
+
+            speed = 0
+            velocity = [0,0,0]
+            pitch = 0
+            yaw = 0
+            roll = 0
+
+            position = [0, 0, 0]
+            positionTrack = []
+            positionTrackQuiver = []
+            velocityTrack = []
+            facingTrack = []
+            trackCounter = 10
+            transform = np.identity(3)
+            facing = [transform[0][2],transform[1][2],transform[2][2]]
+
+            viewVector = [1,0,0]
+            azimuthAngle = 0
+            elevationAngle = 0
+
+            timeStep = 1/30
+
+            lastTick = 0
+            togglePause = False
+            plotToggle = 'origin'
+
         if infoEvents == sg.WIN_CLOSED:
             break
 
         win32gui.EnumWindows(enumHandler,None)
+
+    infoWindow.close()
+    
+    data.close()
+    data2.close()
 
 main()
