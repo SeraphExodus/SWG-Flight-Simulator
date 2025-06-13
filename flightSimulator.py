@@ -419,27 +419,23 @@ def main():
         boosterTS = boosterStats[7] * speedMod
 
     dataLayoutLeft = [
-        [sg.Push(),sg.Text('Speed: ',font=baseFont)],
         [sg.Push(),sg.Text('Pitch: ',font=baseFont)],
         [sg.Push(),sg.Text('Yaw: ',font=baseFont)],
         [sg.Push(),sg.Text('Roll: ',font=baseFont)],
-        [sg.Push(),sg.Text('Booster Energy: ',font=baseFont)],
         [sg.Push(),sg.Text('Coordinates: ',font=baseFont)],
         [sg.Push(),sg.Text('Facing: ',font=baseFont)],
         [sg.Push(),sg.Text('Show K/V Arrows: ',font=baseFont)],
-        [sg.Push(),sg.Text('Show UI: ',font=baseFont)]
+        [sg.Push(),sg.Text('Show UI: ',font=baseFont)],
     ]
 
     dataLayoutRight = [
-        [sg.Text('',key='speedoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='pitchoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='yawoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='rolloutput',font=baseFont),sg.Push()],
-        [sg.Text('',key='boosterenergyoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='coordoutput',font=baseFont),sg.Push()],
         [sg.Text('',key='facingoutput',font=baseFont),sg.Push()],
         [sg.Checkbox('',False,key='quivertoggle'),sg.Push()],
-        [sg.Checkbox('',True,key='uitoggle'),sg.Push()]
+        [sg.Checkbox('',True,key='uitoggle'),sg.Push()],
     ]
 
     dataLayout = [
@@ -485,7 +481,7 @@ def main():
     boosterActive = False
     boosterOffStart = 0
     boosterCurEnergy = boosterEnergy
-    boosterTickRider = time.time() -1.5
+    boosterTickRider = time.time() - 1.5
 
     speed = 0
     velocity = np.array([0,0,0])
@@ -512,10 +508,18 @@ def main():
     togglePause = False
     plotToggle = 'origin'
 
+    lastUpdate = 0
+    updateFlag = True
+
     while True:
-
-        infoEvents, infoValues = infoWindow.read(timeout=0)
-
+        time1 = time.time()
+        if time.time() - lastUpdate > 0.1:
+            infoEvents, infoValues = infoWindow.read(timeout=0)
+            updateFlag = True
+            lastUpdate = time.time()
+        else:
+            updateFlag = False
+        time2 = time.time()
         if infoEvents == 'Pause':
             if togglePause == False:
                 togglePause = True
@@ -613,7 +617,7 @@ def main():
                 yawThrottle = 1
             elif yawThrottle < -1:
                 yawThrottle = -1
-
+        time3 = time.time()
         #Booster energy management - This being here basically assumes the model ticks are gonna be real-time and not laggy. If that's not the case, then recharge/cons rates will be off a bit
         if boosterActive:
             if boosterCurEnergy > 0 and time.time() - boosterTickRider >= 1.5:
@@ -629,8 +633,9 @@ def main():
                     boosterCurEnergy = boosterEnergy
         if time.time() - boosterTickRider >= 1.5:
             boosterTickRider = time.time() #update booster tick if it's past the threshold
-
+        time4 = time.time()
         if time.time() - lastTick > timeStep and togglePause == False:
+            time5 = time.time()
             if lastTick != 0:
                 dt = timeStep
             else:
@@ -645,7 +650,7 @@ def main():
                 boosterAccelMod = 0
                 boosterThrottleMod = 1
             speed = updateAxis(speed,throttle**boosterThrottleMod,topSpeed+boosterSpeedMod,accel+boosterAccelMod,decel,dt)
-            throttleMod = getThrottleMod(speed,topSpeed+boosterSpeedMod,chassisMinThrottleMod,chassisOptThrottleMod,chassisMaxThrottleMod)
+            throttleMod = getThrottleMod(np.linalg.norm(velocity),topSpeed+boosterSpeedMod,chassisMinThrottleMod,chassisOptThrottleMod,chassisMaxThrottleMod)
             pitch = updateAxis(pitch,pitchThrottle,maxPitch*throttleMod,pAccel,pAccel,dt)
             yaw = updateAxis(yaw,yawThrottle,maxYaw*throttleMod,yAccel,yAccel,dt)
             roll = updateAxis(roll,rollThrottle,maxRoll,rAccel,rAccel,dt)
@@ -671,7 +676,7 @@ def main():
             position = [position[0]+velocity[0]*dt, position[1]+velocity[1]*dt, position[2]+velocity[2]*dt]
 
             positionTrack.append(position)
-
+            
             if trackCounter == 10:
                 trackCounter = 0
                 positionTrackQuiver.append(position)
@@ -682,9 +687,9 @@ def main():
                 facingTrack.append(facing)
             else:
                 trackCounter += 1
-
+            time6 = time.time()
             displayedPoints, radii = renderPoints(position,transform,ax)
-
+            time7 = time.time()
             screen.fill((0,0,0))
 
             for i in range(len(displayedPoints)):
@@ -736,7 +741,7 @@ def main():
                 pygame.draw.line(screen,crosshairColor,[512-40,384-35],[512-40,384-45],2)
 
             pygame.display.flip()
-
+            time8 = time.time()
             newViewVector = np.cross(facing,velocity) #perpendicular to facing and velocity. If these are in the same direction, the cross product will be zero in which case we just default back to the x-axis of the ship.
             if np.linalg.norm(newViewVector) != 0:
                 viewVector = normalize(newViewVector)
@@ -752,16 +757,14 @@ def main():
                 elevationAngle = np.arctan(viewVector[2]/np.sqrt(viewVector[0]**2+viewVector[1]**2)) * 180/np.pi
             # print('ele\t' + str(elevationAngle) + '\t' + str(viewVector[2]) + '\t' + str(np.sqrt(viewVector[0]**2+viewVector[1]**2)))
             # print('azi\t' + str(azimuthAngle) + '\t' + str(viewVector[0]) + '\t' + str(viewVector[1]))
-
             lastTick = time.time()
-
-        infoWindow['speedoutput'].update(round(velocityMag*10,0))
-        infoWindow['pitchoutput'].update(round(pitch,0))
-        infoWindow['yawoutput'].update(round(yaw,0))
-        infoWindow['rolloutput'].update(round(roll,0))
-        infoWindow['boosterenergyoutput'].update(str(round(boosterCurEnergy,1))+' / '+str(round(boosterEnergy,1)))
-        infoWindow['coordoutput'].update('X ' + str(round(position[0],0)) + ' Y ' + str(round(position[1],0)) + ' Z ' + str(round(position[2],0)))
-        infoWindow['facingoutput'].update('X ' + str(round(facing[0],2)) + ' Y ' + str(round(facing[1],2)) + ' Z ' + str(round(facing[2],2)))
+            time9 = time.time()
+        if updateFlag:
+            infoWindow['pitchoutput'].update(round(pitch,0))
+            infoWindow['yawoutput'].update(round(yaw,0))
+            infoWindow['rolloutput'].update(round(roll,0))
+            infoWindow['coordoutput'].update('X ' + str(round(position[0],0)) + ' Y ' + str(round(position[1],0)) + ' Z ' + str(round(position[2],0)))
+            infoWindow['facingoutput'].update('X ' + str(round(facing[0],2)) + ' Y ' + str(round(facing[1],2)) + ' Z ' + str(round(facing[2],2)))
 
         if len(positionTrack) > 1000:
             positionTrack = positionTrack[1:]
@@ -796,7 +799,19 @@ def main():
             if infoValues['quivertoggle']:
                 ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[fac[0] for fac in facingTrack],[fac[1] for fac in facingTrack],[fac[2] for fac in facingTrack],length=aLength,color='red')
                 ax.quiver([pos[0] for pos in positionTrackQuiver],[pos[1] for pos in positionTrackQuiver],[pos[2] for pos in positionTrackQuiver],[vel[0] for vel in velocityTrack],[vel[1] for vel in velocityTrack],[vel[2] for vel in velocityTrack],length=aLength,color='green')
+        time10 = time.time()
 
+        # if time5 > time4:
+        #     print('----------------')
+        #     print('Window Read: ', time2-time1)
+        #     print('Get User Inputs: ', time3-time2)
+        #     print('Process Booster Stuff: ', time4-time3)
+        #     print('Flight Simulation: ', time6-time5)
+        #     print('Point Cloud Rendering: ', time7-time6)
+        #     print('Draw UI: ', time8-time7)
+        #     print('Rotate 3D Plot: ', time9-time8)
+        #     print('Update 3D Plot: ',time10-time9)
+            
         if infoEvents == 'Reset':
             throttle = 0
             pitchThrottle = 0
